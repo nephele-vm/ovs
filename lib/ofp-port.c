@@ -67,6 +67,12 @@ ofputil_port_map_get_number(const struct ofputil_port_map *map,
     return node && !node->duplicate ? u16_to_ofp(node->number) : OFPP_NONE;
 }
 
+int
+ofputil_port_map_remove(struct ofputil_port_map *map, const char *name)
+{
+    return namemap_remove_by_name(&map->map, name);
+}
+
 void
 ofputil_port_map_destroy(struct ofputil_port_map *map)
 {

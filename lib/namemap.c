@@ -86,6 +86,27 @@ namemap_put(struct namemap *map, uint32_t number, const char *name)
     node->duplicate = false;
 }
 
+int
+namemap_remove_by_name(struct namemap *map, const char *name)
+{
+    struct namemap_node *node;
+    int rc = 0;
+
+    node = namemap_find_by_name(map, name);
+    if (!node) {
+    	rc = -1;
+    	goto out;
+    }
+
+    hmap_remove(&map->by_number, &node->number_node);
+    hmap_remove(&map->by_name, &node->name_node);
+    free(node->name);
+    free(node);
+
+out:
+    return rc;
+}
+
 void
 namemap_destroy(struct namemap *map)
 {

@@ -131,3 +131,20 @@ FLAKE8_PYFILES += utilities/ovs-pcap.in \
 	utilities/ovs-pipegen.py
 
 include utilities/bugtool/automake.mk
+
+# libovsctl
+lib_LTLIBRARIES += utilities/libovsctl.la
+utilities_libovsctl_la_LDFLAGS = \
+        $(OVS_LTINFO) \
+        -Wl,--version-script=$(top_builddir)/utilities/libovsctl.sym \
+        $(AM_LDFLAGS)
+utilities_libovsctl_la_SOURCES = \
+	utilities/ovs-ctl.h \
+	utilities/ovs-vsctl.c \
+	utilities/ovs-ofctl.c
+utilities_libovsctl_la_CFLAGS = $(AM_CFLAGS) -DLIB_OVS_CTL
+utilities_libovsctl_la_CPPFLAGS = $(AM_CPPFLAGS)
+
+pkgconfig_DATA += \
+	utilities/libovsctl.pc
+

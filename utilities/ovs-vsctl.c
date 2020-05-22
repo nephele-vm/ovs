@@ -145,6 +145,7 @@ static struct uuid *neoteric_ifaces;
 static size_t n_neoteric_ifaces;
 static size_t allocated_neoteric_ifaces;
 
+#ifndef LIB_OVS_CTL
 int
 main(int argc, char *argv[])
 {
@@ -212,6 +213,83 @@ main(int argc, char *argv[])
         }
     }
 }
+#else
+#include "ovs-ctl.h"
+
+int ovs_vsctl_init(void)
+{
+    fatal_ignore_sigpipe();
+#if 0/* TODO debug */
+    vlog_set_levels(NULL, VLF_ANY_DESTINATION, VLL_DBG);
+#else
+    vlog_set_levels(NULL, VLF_CONSOLE, VLL_ERR);
+    vlog_set_levels_from_string_assert("reconnect:warn");
+#endif
+
+    vsctl_cmd_init();
+
+    return 0;
+}
+
+int ovs_vsctl_run_command(int argc, char *argv[])
+{
+    struct ovsdb_idl *idl;
+    struct ctl_command *commands;
+    struct shash local_options;
+    unsigned int seqno;
+    size_t n_commands;
+
+    //TODO run valgrind for leaks
+
+    /* Parse command line. */
+    char *args = process_escape_args(argv);
+    shash_init(&local_options);
+    optind = 0;
+    parse_options(argc, argv, &local_options);
+    char *error = ctl_parse_commands(argc - optind, argv + optind,
+                                     &local_options, &commands, &n_commands);
+    if (error) {
+        ctl_fatal("%s", error);
+    }
+    VLOG(ctl_might_write_to_db(commands, n_commands) ? VLL_INFO : VLL_DBG,
+         "Called as %s", args);
+
+    ctl_timeout_setup(timeout);
+
+    idl = the_idl = ovsdb_idl_create_unconnected(&ovsrec_idl_class, false);
+    ovsdb_idl_set_shuffle_remotes(idl, shuffle_remotes);
+    ovsdb_idl_set_remote(idl, db, retry);
+    ovsdb_idl_set_leader_only(idl, leader_only);
+    run_prerequisites(commands, n_commands, idl);
+
+    seqno = ovsdb_idl_get_seqno(idl);
+    for (;;) {
+        ovsdb_idl_run(idl);
+        if (!ovsdb_idl_is_alive(idl)) {
+            int retval = ovsdb_idl_get_last_error(idl);
+            ctl_fatal("%s: database connection failed (%s)",
+                        db, ovs_retval_to_string(retval));
+        }
+
+        if (seqno != ovsdb_idl_get_seqno(idl)) {
+            seqno = ovsdb_idl_get_seqno(idl);
+            if (do_vsctl(args, commands, n_commands, idl)) {
+                free(args);
+                break;
+            }
+        }
+
+        if (seqno == ovsdb_idl_get_seqno(idl)) {
+            ovsdb_idl_wait(idl);
+            poll_block();
+        }
+    }
+
+    shash_destroy_free_data(&local_options);
+
+    return 0;
+}
+#endif
 
 static void
 parse_options(int argc, char *argv[], struct shash *local_options)

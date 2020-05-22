@@ -44,6 +44,7 @@ ofp_port_t ofputil_port_map_get_number(const struct ofputil_port_map *,
                                       const char *name);
 void ofputil_port_map_put(struct ofputil_port_map *,
                           ofp_port_t, const char *name);
+int ofputil_port_map_remove(struct ofputil_port_map *map, const char *name);
 void ofputil_port_map_destroy(struct ofputil_port_map *);
 
 /* Port numbers. */

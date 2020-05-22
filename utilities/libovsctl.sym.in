@@ -1,0 +1,4 @@
+libovsctl_@LT_CURRENT@ {
+global:
+        *;
+};

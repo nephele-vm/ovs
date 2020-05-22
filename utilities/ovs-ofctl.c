@@ -156,11 +156,17 @@ static int print_pcap = 0;
 /* --raw: Makes "ofp-print" read binary data from stdin. */
 static int raw = 0;
 
+static int rebuild_map = 0;
+
 static const struct ovs_cmdl_command *get_all_commands(void);
 
 OVS_NO_RETURN static void usage(void);
 static void parse_options(int argc, char *argv[]);
 
+static void port_map_clear(void);
+static void table_map_clear(void);
+
+#ifndef LIB_OVS_CTL
 int
 main(int argc, char *argv[])
 {
@@ -180,6 +186,23 @@ main(int argc, char *argv[])
     }
     return 0;
 }
+#else /* LIB_OVS_CTL */
+#include "ovs-ctl.h"
+
+int ovs_ofctl_init(void)
+{
+    rebuild_map = 1;
+    return 0;
+}
+
+int ovs_ofctl_fini(void)
+{
+    port_map_clear();
+    table_map_clear();
+    rebuild_map = 0;
+    return 0;
+}
+#endif /* LIB_OVS_CTL */
 
 static void
 add_sort_criterion(enum sort_order order, const char *field)
@@ -1153,15 +1176,18 @@ fetch_ofputil_phy_port(const char *vconn_name, const char *port_name,
     }
 }
 
+static struct shash port_maps = SHASH_INITIALIZER(&port_maps);
+
 static const struct ofputil_port_map *
 get_port_map(const char *vconn_name)
 {
-    static struct shash port_maps = SHASH_INITIALIZER(&port_maps);
     struct ofputil_port_map *map = shash_find_data(&port_maps, vconn_name);
-    if (!map) {
+    if (!map || rebuild_map) {
+        if (!map) {
         map = xmalloc(sizeof *map);
         ofputil_port_map_init(map);
         shash_add(&port_maps, vconn_name, map);
+        }
 
         if (!strchr(vconn_name, ':') || !vconn_verify_name(vconn_name)) {
             /* For an active vconn (which includes a vconn constructed from a
@@ -1186,6 +1212,36 @@ get_port_map(const char *vconn_name)
         }
     }
     return map;
+}
+
+static void port_map_clear(void)
+{
+    struct shash_node *node, *next;
+
+    SHASH_FOR_EACH_SAFE (node, next, &port_maps) {
+    	struct ofputil_port_map *map = node->data;
+    	ofputil_port_map_destroy(map);
+        free(map);
+        shash_delete(&port_maps, node);
+    }
+    shash_destroy(&port_maps);
+}
+
+int port_map_remove(const char *vconn_name, const char *name)
+{
+    struct ofputil_port_map *map;
+    int rc;
+
+    map = shash_find_data(&port_maps, vconn_name);
+    if (!map) {
+    	rc = -ENOENT;
+    	goto out;
+    }
+
+    rc = ofputil_port_map_remove(map, name);
+
+out:
+    return rc;
 }
 
 static const struct ofputil_port_map *
@@ -1303,15 +1359,18 @@ table_iterator_destroy(struct table_iterator *ti)
     }
 }
 
+static struct shash table_maps = SHASH_INITIALIZER(&table_maps);
+
 static const struct ofputil_table_map *
 get_table_map(const char *vconn_name)
 {
-    static struct shash table_maps = SHASH_INITIALIZER(&table_maps);
     struct ofputil_table_map *map = shash_find_data(&table_maps, vconn_name);
-    if (!map) {
+    if (!map || rebuild_map) {
+        if (!map) {
         map = xmalloc(sizeof *map);
         ofputil_table_map_init(map);
         shash_add(&table_maps, vconn_name, map);
+        }
 
         if (!strchr(vconn_name, ':') || !vconn_verify_name(vconn_name)) {
             /* For an active vconn (which includes a vconn constructed from a
@@ -1342,6 +1401,19 @@ get_table_map(const char *vconn_name)
         }
     }
     return map;
+}
+
+static void table_map_clear(void)
+{
+    struct shash_node *node, *next;
+
+    SHASH_FOR_EACH_SAFE (node, next, &table_maps) {
+    	struct ofputil_table_map *map = node->data;
+    	ofputil_table_map_destroy(map);
+        free(map);
+        shash_delete(&table_maps, node);
+    }
+    shash_destroy(&table_maps);
 }
 
 static const struct ofputil_table_map *
@@ -1804,7 +1876,7 @@ ofctl_flow_mod(int argc, char *argv[], uint16_t command)
     }
 }
 
-static void
+/*static*/ void
 ofctl_add_flow(struct ovs_cmdl_context *ctx)
 {
     ofctl_flow_mod(ctx->argc, ctx->argv, OFPFC_ADD);
@@ -3142,7 +3214,7 @@ ofctl_group_mod(int argc, char *argv[], uint16_t command)
     }
 }
 
-static void
+/*static*/ void
 ofctl_add_group(struct ovs_cmdl_context *ctx)
 {
     ofctl_group_mod(ctx->argc, ctx->argv, OFPGC11_ADD);
@@ -3161,19 +3233,19 @@ ofctl_mod_group(struct ovs_cmdl_context *ctx)
                     may_create ? OFPGC11_ADD_OR_MOD : OFPGC11_MODIFY);
 }
 
-static void
+/*static*/ void
 ofctl_del_groups(struct ovs_cmdl_context *ctx)
 {
     ofctl_group_mod(ctx->argc, ctx->argv, OFPGC11_DELETE);
 }
 
-static void
+/*static*/ void
 ofctl_insert_bucket(struct ovs_cmdl_context *ctx)
 {
     ofctl_group_mod(ctx->argc, ctx->argv, OFPGC15_INSERT_BUCKET);
 }
 
-static void
+/*static*/ void
 ofctl_remove_bucket(struct ovs_cmdl_context *ctx)
 {
     ofctl_group_mod(ctx->argc, ctx->argv, OFPGC15_REMOVE_BUCKET);
