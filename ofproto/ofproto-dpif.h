@@ -123,6 +123,7 @@ enum group_selection_method {
     SEL_METHOD_DEFAULT,
     SEL_METHOD_DP_HASH,
     SEL_METHOD_HASH,
+    SEL_METHOD_ROUND_ROBIN,
 };
 
 struct group_dpif {

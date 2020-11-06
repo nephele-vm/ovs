@@ -4568,8 +4568,8 @@ pick_default_select_group(struct xlate_ctx *ctx, struct group_dpif *group)
                                   flow_hash_symmetric_l4(&ctx->xin->flow, 0));
 }
 
-static struct ofputil_bucket *
-pick_hash_fields_select_group(struct xlate_ctx *ctx, struct group_dpif *group)
+static uint32_t
+hash_fields_selection_basis(struct xlate_ctx *ctx, struct group_dpif *group)
 {
     const struct field_array *fields = &group->up.props.fields;
     const uint8_t *mask_values = fields->values;
@@ -4604,6 +4604,14 @@ pick_hash_fields_select_group(struct xlate_ctx *ctx, struct group_dpif *group)
 
         mf_mask_field_masked(mf, &mask, ctx->wc);
     }
+
+    return basis;
+}
+
+static struct ofputil_bucket *
+pick_hash_fields_select_group(struct xlate_ctx *ctx, struct group_dpif *group)
+{
+    uint32_t basis = hash_fields_selection_basis(ctx, group);
 
     return group_best_live_bucket(ctx, group, basis);
 }
@@ -4647,6 +4655,55 @@ pick_dp_hash_select_group(struct xlate_ctx *ctx, struct group_dpif *group)
 }
 
 static struct ofputil_bucket *
+pick_round_robin_select_group(struct xlate_ctx *ctx, struct group_dpif *group)
+{
+    uint32_t basis;
+    struct rr_backlog_node *node, *prev;
+    struct ovs_list *iter;
+    struct ofputil_bucket *b;
+
+    basis = hash_fields_selection_basis(ctx, group);
+
+    LIST_FOR_EACH_SAFE(node, prev, node, &group->up.rr_backlog_list) {
+        if (node->hash == basis) {
+            if (&node->node != ovs_list_front(&group->up.rr_backlog_list)) {
+                ovs_list_remove(&node->node);
+                ovs_list_push_front(&group->up.rr_backlog_list, &node->node);
+            }
+            return node->bucket;
+        }
+    }
+
+    iter = group->up.last_rr_bucket
+            ? group->up.last_rr_bucket->list_node.next
+            : group->up.buckets.next;
+
+    for (int i = 0; i < group->up.n_buckets; i++) {
+        if (iter == &group->up.buckets)
+            iter = iter->next;
+        b = OBJECT_CONTAINING(iter, b, list_node);
+        if (bucket_is_alive(ctx, b, 0)) {
+            group->up.last_rr_bucket = b;
+
+            if (group->up.rr_backlog_list_size == 20) {
+                node = ovs_list_pop_back(&group->up.rr_backlog_list);
+                free(node);
+            } else
+                group->up.rr_backlog_list_size++;
+
+            node = xzalloc(sizeof *node);
+            node->hash = basis;
+            node->bucket = b;
+            ovs_list_push_front(&group->up.rr_backlog_list, &node->node);
+            return b;
+        }
+        iter = iter->next;
+    }
+
+    return NULL;
+}
+
+static struct ofputil_bucket *
 pick_select_group(struct xlate_ctx *ctx, struct group_dpif *group)
 {
     /* Select groups may access flow keys beyond L2 in order to
@@ -4666,6 +4723,9 @@ pick_select_group(struct xlate_ctx *ctx, struct group_dpif *group)
         break;
     case SEL_METHOD_DP_HASH:
         return pick_dp_hash_select_group(ctx, group);
+        break;
+    case SEL_METHOD_ROUND_ROBIN:
+        return pick_round_robin_select_group(ctx, group);
         break;
     default:
         /* Parsing of groups ensures this never happens */

@@ -3062,11 +3062,15 @@ ofproto_group_try_ref(struct ofgroup *group)
 static void
 group_destroy_cb(struct ofgroup *group)
 {
+    struct rr_backlog_node *node;
+
     group->ofproto->ofproto_class->group_destruct(group);
     ofputil_group_properties_destroy(CONST_CAST(struct ofputil_group_props *,
                                                 &group->props));
     ofputil_bucket_list_destroy(CONST_CAST(struct ovs_list *,
                                            &group->buckets));
+    LIST_FOR_EACH_POP(node, node, &group->rr_backlog_list)
+        free(node);
     group->ofproto->ofproto_class->group_dealloc(group);
 }
 
@@ -7340,10 +7344,14 @@ init_group(struct ofproto *ofproto, const struct ofputil_group_mod *gm,
     ovs_list_init(CONST_CAST(struct ovs_list *, &(*ofgroup)->buckets));
     ofputil_bucket_clone_list(CONST_CAST(struct ovs_list *,
                                          &(*ofgroup)->buckets),
-                              &gm->buckets, NULL);
+                              &gm->buckets, NULL, NULL, NULL);
 
     *CONST_CAST(uint32_t *, &(*ofgroup)->n_buckets) =
         ovs_list_size(&(*ofgroup)->buckets);
+
+    (*ofgroup)->last_rr_bucket = NULL;
+    ovs_list_init(&(*ofgroup)->rr_backlog_list);
+    (*ofgroup)->rr_backlog_list_size = 0;
 
     ofputil_group_properties_copy(CONST_CAST(struct ofputil_group_props *,
                                              &(*ofgroup)->props),
@@ -7425,7 +7433,9 @@ copy_buckets_for_insert_bucket(const struct ofgroup *ofgroup,
 
     ofputil_bucket_clone_list(CONST_CAST(struct ovs_list *,
                                          &new_ofgroup->buckets),
-                              &ofgroup->buckets, NULL);
+                              &ofgroup->buckets, NULL,
+                              ofgroup->last_rr_bucket,
+                              &new_ofgroup->last_rr_bucket);
 
     if (ofputil_bucket_check_duplicate_id(&new_ofgroup->buckets)) {
             VLOG_INFO_RL(&rl, "Duplicate bucket id");
@@ -7491,7 +7501,9 @@ copy_buckets_for_remove_bucket(const struct ofgroup *ofgroup,
 
     ofputil_bucket_clone_list(CONST_CAST(struct ovs_list *,
                                          &new_ofgroup->buckets),
-                              &ofgroup->buckets, skip);
+                              &ofgroup->buckets, skip,
+                              ofgroup->last_rr_bucket,
+                              &new_ofgroup->last_rr_bucket);
 
     return 0;
 }
@@ -7550,6 +7562,9 @@ modify_group_start(struct ofproto *ofproto, struct ofproto_group_mod *ogm)
     if (error) {
         goto out;
     }
+
+    ovs_list_move(&new_group->rr_backlog_list, &old_group->rr_backlog_list);
+    new_group->rr_backlog_list_size = old_group->rr_backlog_list_size;
 
     /* The group creation time does not change during modification. */
     *CONST_CAST(long long int *, &(new_group->created)) = old_group->created;

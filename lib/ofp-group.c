@@ -126,19 +126,27 @@ ofputil_bucket_clone_data(const struct ofputil_bucket *bucket)
  * be cloned and appended to 'dest'. */
 void
 ofputil_bucket_clone_list(struct ovs_list *dest, const struct ovs_list *src,
-                          const struct ofputil_bucket *skip)
+                          const struct ofputil_bucket *skip,
+                          const struct ofputil_bucket *src_last_rr_bucket,
+                          struct ofputil_bucket **dst_last_rr_bucket)
 {
-    struct ofputil_bucket *bucket;
+    struct ofputil_bucket *bucket, *prev = NULL;
 
     LIST_FOR_EACH (bucket, list_node, src) {
         struct ofputil_bucket *new_bucket;
 
         if (bucket == skip) {
+            if (src_last_rr_bucket == skip)
+                *dst_last_rr_bucket = prev;
             continue;
         }
 
         new_bucket = ofputil_bucket_clone_data(bucket);
         ovs_list_push_back(dest, &new_bucket->list_node);
+
+        if (src_last_rr_bucket == bucket)
+            *dst_last_rr_bucket = new_bucket;
+        prev = new_bucket;
     }
 }
 
@@ -995,6 +1003,7 @@ parse_ofp_group_mod_str__(struct ofputil_group_mod *gm, int command,
 
     /* Exclude fields for non "hash" selection method. */
     if (strcmp(gm->props.selection_method, "hash") &&
+        strcmp(gm->props.selection_method, "round-robin") &&
         gm->props.fields.values_size) {
         error = xstrdup("fields may only be specified with "
                         "\"selection_method=hash\"");
@@ -1579,7 +1588,8 @@ parse_group_prop_ntr_selection_method(struct ofpbuf *payload,
     }
 
     if (strcmp("hash", prop->selection_method)
-        && strcmp("dp_hash", prop->selection_method)) {
+        && strcmp("dp_hash", prop->selection_method)
+        && strcmp("round-robin", prop->selection_method)) {
         OFPPROP_LOG(&rl, false,
                     "ntr selection method '%s' is not supported",
                     prop->selection_method);
@@ -1593,7 +1603,8 @@ parse_group_prop_ntr_selection_method(struct ofpbuf *payload,
     ofpbuf_pull(payload, sizeof *prop);
 
     fields_len = ntohs(prop->length) - sizeof *prop;
-    if (fields_len && strcmp("hash", gp->selection_method)) {
+    if (fields_len && strcmp("hash", gp->selection_method)
+        && strcmp("round-robin", gp->selection_method)) {
         OFPPROP_LOG(&rl, false, "ntr selection method %s "
                     "does not support fields", gp->selection_method);
         return OFPERR_OFPBPC_BAD_VALUE;

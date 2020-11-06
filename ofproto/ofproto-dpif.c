@@ -5179,6 +5179,20 @@ group_set_selection_method(struct group_dpif *group)
             VLOG_DBG("No hash fields. Falling back to default hash method.");
             group->selection_method = SEL_METHOD_DEFAULT;
         }
+    } else if (!strcmp(selection_method, "round-robin")) {
+        VLOG_DBG("Selection method specified: round-robin.");
+        if (props->fields.values_size > 0) {
+            /* Controller has specified hash fields. */
+            struct ds s = DS_EMPTY_INITIALIZER;
+            oxm_format_field_array(&s, &props->fields);
+            VLOG_DBG("Hash fields: %s", ds_cstr(&s));
+            ds_destroy(&s);
+            group->selection_method = SEL_METHOD_ROUND_ROBIN;
+        } else {
+            /* No hash fields. Fall back to original default hashing. */
+            VLOG_DBG("No hash fields. Falling back to default hash method.");
+            group->selection_method = SEL_METHOD_DEFAULT;
+        }
     } else {
         /* Parsing of groups should ensure this never happens */
         OVS_NOT_REACHED();

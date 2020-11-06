@@ -64,7 +64,9 @@ struct ofputil_bucket {
 void ofputil_bucket_list_destroy(struct ovs_list *buckets);
 void ofputil_bucket_clone_list(struct ovs_list *dest,
                                const struct ovs_list *src,
-                               const struct ofputil_bucket *);
+                               const struct ofputil_bucket *,
+                               const struct ofputil_bucket *,
+                               struct ofputil_bucket **);
 struct ofputil_bucket *ofputil_bucket_find(const struct ovs_list *,
                                            uint32_t bucket_id);
 bool ofputil_bucket_check_duplicate_id(const struct ovs_list *);

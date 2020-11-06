@@ -582,10 +582,19 @@ struct ofgroup {
 
     const struct ovs_list buckets;    /* Contains "struct ofputil_bucket"s. */
     const uint32_t n_buckets;
+    struct ofputil_bucket *last_rr_bucket;
+    struct ovs_list rr_backlog_list;
+    uint32_t rr_backlog_list_size;
 
     struct ofputil_group_props props;
 
     struct rule_collection rules OVS_GUARDED;   /* Referring rules. */
+};
+
+struct rr_backlog_node {
+    struct ovs_list node;
+    uint32_t hash;
+    struct ofputil_bucket *bucket;
 };
 
 struct pkt_stats {
